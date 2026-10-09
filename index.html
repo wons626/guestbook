@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>실시간 방명록</title>
+<!-- Supabase 접속 도구(라이브러리) 불러오기 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1d2129; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --accent-text: #ffffff;
+    --mine: #eff6ff; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111318; --card: #1b1e25; --text: #e8eaed; --muted: #9aa0a6;
+      --line: #2c313a; --accent: #4f8bff; --accent-text: #ffffff;
+      --mine: #1c2740; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 60px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 24px; margin: 0; }
+  h2 { font-size: 17px; margin: 28px 0 12px; }
+  .live { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .live.on { color: var(--ok); }
+  .live.off { color: var(--err); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab { flex: 1; padding: 9px; border: 1px solid var(--line); background: transparent; color: var(--muted);
+         border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .tab.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  form { display: flex; flex-direction: column; gap: 8px; }
+  input, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+                    background: var(--bg); color: var(--text); font-size: 15px; font-family: inherit; }
+  textarea { resize: vertical; }
+  button { font-family: inherit; }
+  .primary { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent);
+             color: var(--accent-text); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .primary:disabled { opacity: .5; cursor: default; }
+  .ghost { border: 1px solid var(--line); background: transparent; color: var(--muted);
+           border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .me { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+        font-size: 14px; color: var(--muted); gap: 8px; }
+  .row { display: flex; justify-content: space-between; align-items: center; }
+  #count { font-size: 12px; color: var(--muted); }
+  .notice { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 14px;
+            background: var(--card); border: 1px solid var(--line); }
+  .notice.ok { color: var(--ok); } .notice.warn { color: var(--warn); } .notice.error { color: var(--err); }
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .post { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .post.mine { background: var(--mine); }
+  .post.flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } }
+  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .head time { font-size: 12px; color: var(--muted); }
+  .del { margin-left: auto; border: 0; background: transparent; color: var(--err); cursor: pointer; font-size: 13px; }
+  .post p { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>실시간 방명록</h1>
+    <span id="live" class="live">연결 중…</span>
+  </header>
+
+  <!-- 로그인 / 회원가입 (로그아웃 상태에서 보임) -->
+  <section id="authBox" class="card">
+    <div class="tabs">
+      <button type="button" class="tab active" data-mode="login">로그인</button>
+      <button type="button" class="tab" data-mode="signup">회원가입</button>
+    </div>
+    <form id="authForm">
+      <input id="email" type="email" placeholder="이메일" required autocomplete="email">
+      <input id="password" type="password" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password">
+      <input id="signupNick" type="text" placeholder="닉네임 (최대 20자)" maxlength="20" hidden>
+      <button type="submit" id="authBtn" class="primary">로그인</button>
+    </form>
+    <p class="hint">로그인하지 않아도 글은 볼 수 있어요. 글을 쓰려면 로그인하세요.</p>
+  </section>
+
+  <!-- 글쓰기 (로그인 상태에서 보임) -->
+  <section id="writeBox" class="card" hidden>
+    <div class="me"><span id="meText"></span><button type="button" id="logoutBtn" class="ghost">로그아웃</button></div>
+    <form id="postForm">
+      <input id="nick" type="text" maxlength="20" placeholder="닉네임" required>
+      <textarea id="msg" maxlength="300" rows="3" placeholder="남기고 싶은 말 (최대 300자)" required></textarea>
+      <div class="row"><span id="count">0 / 300</span><button type="submit" class="primary">남기기</button></div>
+    </form>
+  </section>
+
+  <p id="notice" class="notice" hidden></p>
+
+  <section>
+    <h2>방명록 <span id="total"></span></h2>
+    <ul id="list"></ul>
+    <p id="empty" class="empty" hidden>아직 글이 없어요. 첫 글을 남겨 보세요!</p>
+  </section>
+</main>
+
+<script>
+// ===== 1. 저장 서버(Supabase) 접속 정보 =====
+const SUPABASE_URL = 'https://cxegjrhwadmhoevusgnd.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_8KR938tctBgjEFASAwxmUw_P9fIWM7J'; // 공개용 키 (권한 규칙이 데이터를 보호)
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let user = null;          // 현재 로그인한 사용자
+let mode = 'login';       // 로그인/회원가입 탭 상태
+const posts = new Map();  // 화면에 보여줄 글 목록 (id → 글)
+const $ = id => document.getElementById(id);
+
+// ===== 2. 안내 메시지 =====
+function notify(text, type = 'info') {
+  const n = $('notice');
+  n.textContent = text;
+  n.className = 'notice ' + type;
+  n.hidden = false;
+  clearTimeout(notify.timer);
+  notify.timer = setTimeout(() => { n.hidden = true; }, 4000);
+}
+
+function koError(e) {
+  const m = (e && e.message) || String(e);
+  if (/Invalid login credentials/i.test(m)) return '이메일 또는 비밀번호가 맞지 않습니다.';
+  if (/already registered/i.test(m)) return '이미 가입된 이메일입니다. 로그인해 주세요.';
+  if (/Password should be/i.test(m)) return '비밀번호는 6자 이상이어야 합니다.';
+  if (/Email not confirmed/i.test(m)) return '이메일 인증이 필요합니다. Supabase에서 Confirm email 설정을 꺼 주세요.';
+  if (/rate limit/i.test(m)) return '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.';
+  if (/row-level security/i.test(m)) return '권한이 없습니다. 다시 로그인해 주세요.';
+  return '오류: ' + m;
+}
+
+// ===== 3. 로그인 / 회원가입 =====
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.onclick = () => {
+    mode = btn.dataset.mode;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
+    const signup = mode === 'signup';
+    $('signupNick').hidden = !signup;
+    $('signupNick').required = signup;
+    $('authBtn').textContent = signup ? '회원가입' : '로그인';
+    $('password').autocomplete = signup ? 'new-password' : 'current-password';
+  };
+});
+
+$('authForm').onsubmit = async e => {
+  e.preventDefault();
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  $('authBtn').disabled = true;
+  try {
+    if (mode === 'signup') {
+      const nickname = $('signupNick').value.trim();
+      const { data, error } = await sb.auth.signUp({ email, password, options: { data: { nickname } } });
+      if (error) throw error;
+      if (!data.session) notify('가입은 됐지만 이메일 인증이 켜져 있어 로그인이 안 됩니다. Supabase에서 Confirm email을 꺼 주세요.', 'warn');
+      else notify('가입 완료! 환영합니다.', 'ok');
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      notify('로그인되었습니다.', 'ok');
+    }
+    $('authForm').reset();
+  } catch (err) {
+    notify(koError(err), 'error');
+  } finally {
+    $('authBtn').disabled = false;
+  }
+};
+
+$('logoutBtn').onclick = async () => {
+  await sb.auth.signOut();
+  notify('로그아웃되었습니다.');
+};
+
+// 로그인 상태가 바뀔 때마다 화면 전환
+sb.auth.onAuthStateChange((_event, session) => {
+  user = session ? session.user : null;
+  renderAuth();
+  render();
+});
+
+function renderAuth() {
+  $('authBox').hidden = !!user;
+  $('writeBox').hidden = !user;
+  if (user) {
+    $('meText').textContent = user.email + ' 님';
+    if (!$('nick').value) {
+      $('nick').value = (user.user_metadata && user.user_metadata.nickname) || user.email.split('@')[0].slice(0, 20);
+    }
+  } else {
+    $('nick').value = '';
+  }
+}
+
+// ===== 4. 글 쓰기 / 삭제 =====
+$('msg').oninput = () => { $('count').textContent = $('msg').value.length + ' / 300'; };
+
+$('postForm').onsubmit = async e => {
+  e.preventDefault();
+  const nickname = $('nick').value.trim();
+  const message = $('msg').value.trim();
+  if (!nickname || !message) return;
+  const btn = e.submitter;
+  if (btn) btn.disabled = true;
+  // 서버에 저장 (작성자 ID는 서버가 로그인 정보로 자동 기록)
+  const { data, error } = await sb.from('guestbook').insert({ nickname, message }).select().single();
+  if (btn) btn.disabled = false;
+  if (error) return notify(koError(error), 'error');
+  posts.set(data.id, data);
+  render();
+  $('msg').value = '';
+  $('count').textContent = '0 / 300';
+};
+
+async function removePost(id) {
+  if (!confirm('이 글을 삭제할까요?')) return;
+  const { error } = await sb.from('guestbook').delete().eq('id', id);
+  if (error) return notify(koError(error), 'error');
+  posts.delete(id);
+  render();
+}
+
+// ===== 5. 화면 그리기 =====
+function fmt(ts) {
+  return new Date(ts).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function render() {
+  const list = $('list');
+  list.replaceChildren();
+  const rows = [...posts.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  $('total').textContent = rows.length ? `(${rows.length})` : '';
+  $('empty').hidden = rows.length > 0;
+
+  for (const p of rows) {
+    const mine = user && p.user_id === user.id;
+    const li = document.createElement('li');
+    li.className = 'post' + (mine ? ' mine' : '');
+    if (p._new) { li.classList.add('flash'); delete p._new; }
+
+    const head = document.createElement('div');
+    head.className = 'head';
+    const name = document.createElement('strong');
+    name.textContent = p.nickname;           // textContent: 입력값을 글자로만 표시 (악성 코드 방지)
+    const time = document.createElement('time');
+    time.textContent = fmt(p.created_at);
+    head.append(name, time);
+
+    if (mine) {
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '삭제';
+      del.onclick = () => removePost(p.id);
+      head.append(del);
+    }
+
+    const body = document.createElement('p');
+    body.textContent = p.message;
+    li.append(head, body);
+    list.append(li);
+  }
+}
+
+// ===== 6. 처음 접속 시 저장된 글 불러오기 =====
+async function load() {
+  const { data, error } = await sb.from('guestbook').select('*').order('created_at', { ascending: false }).limit(100);
+  if (error) return notify(koError(error), 'error');
+  data.forEach(p => posts.set(p.id, p));
+  render();
+}
+
+// ===== 7. 실시간: 누가 글을 쓰거나 지우면 바로 반영 =====
+sb.channel('guestbook-live')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'guestbook' }, payload => {
+    if (payload.eventType === 'INSERT' && !posts.has(payload.new.id)) {
+      posts.set(payload.new.id, { ...payload.new, _new: true });
+      render();
+    } else if (payload.eventType === 'DELETE' && payload.old && payload.old.id != null) {
+      posts.delete(payload.old.id);
+      render();
+    }
+  })
+  .subscribe(status => {
+    const l = $('live');
+    if (status === 'SUBSCRIBED') { l.textContent = '● 실시간 연결됨'; l.className = 'live on'; }
+    else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) { l.textContent = '● 연결 끊김'; l.className = 'live off'; }
+  });
+
+load();
+</script>
+</body>
+</html>
